@@ -1,6 +1,5 @@
 import scrapy
-import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from pymongo import MongoClient
 
@@ -25,11 +24,15 @@ class VNExpressSpider(scrapy.Spider):
         ],
     }
 
-    def __init__(self):
+    def __init__(self, mongo_client):
         super().__init__()
-        self.client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
+        self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test']
+        self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+        self.two_weeks_ago = self.now - timedelta(weeks=2)
+        self.three_weeks_ago = self.now - timedelta(weeks=3)
+        self.page_count = 0
 
     def parse(self, response):
         CATEGORY_SELECTOR = 'nav.main-nav ul.parent li a::attr(href)'
@@ -42,10 +45,12 @@ class VNExpressSpider(scrapy.Spider):
         for article_url in response.css(ARTICLE_SELECTOR).extract():
             yield response.follow(article_url, self.parse_article)
 
-        NEXT_PAGE_SELECTOR = 'a.next-page::attr(href)'
-        next_page = response.css(NEXT_PAGE_SELECTOR).extract_first()
-        if next_page:
-            yield response.follow(next_page, self.parse_category)
+        if self.page_count < 5:
+            NEXT_PAGE_SELECTOR = 'a.next-page::attr(href)'
+            next_page = response.css(NEXT_PAGE_SELECTOR).extract_first()
+            if next_page:
+                self.page_count += 1
+                yield response.follow(next_page, self.parse_category)
 
     def parse_article(self, response):
         TIME_SELECTOR = 'div.header-content span.date::text'
@@ -55,11 +60,17 @@ class VNExpressSpider(scrapy.Spider):
         DETAIL_SELECTOR = 'article.fck_detail p.Normal::text'
         CATEGORY_SELECTOR = 'nav.main-nav ul.parent li.active a::text'
         QUIZ_SELECTOR = 'article.fck_detail div.item_quiz .tittle_quiz::text'
+        
         time_post = response.css(TIME_SELECTOR).extract_first()
         if time_post:
             time_post = self.convert_time_format(time_post)
+            article_date = datetime.fromisoformat(time_post)
         else:
-            time_post = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).isoformat()
+            article_date = self.now
+        
+        if not (self.three_weeks_ago <= article_date <= self.now):
+            self.log(f"Article with URL {response.url} is outside the desired date range.")
+            return
         
         if len(response.css(QUIZ_SELECTOR).extract()) > 0:
             self.log(f"Article with URL {response.url} contains a quiz and will not be inserted into MongoDB.")
@@ -72,18 +83,13 @@ class VNExpressSpider(scrapy.Spider):
             title = response.css(TITLE_SELECTOR).extract_first()
             content = " ".join(response.css(DETAIL_SELECTOR).extract())
 
-
-
-            id = hashlib.md5((title + time_post).encode()).hexdigest()
-
             article_data = {
-                'id': id,
                 'source': 'Báo VnExpress',
                 'url': response.url,
                 'title': title,
                 'summary': response.css(SUMMARY_SELECTOR).extract_first(),
                 'author': author,
-                'time': time_post,
+                'time': article_date,  # Insert datetime object
                 'tagList': tag_list,
                 'content': content
             }
@@ -102,7 +108,7 @@ class VNExpressSpider(scrapy.Spider):
             return dt
         except ValueError as e:
             self.log(f"Error parsing time: {e}")
-            return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).isoformat()
+            return self.now.isoformat()
 
     def closed(self, reason):
         self.client.close()
