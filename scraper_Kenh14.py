@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 import pytz
 from pymongo import MongoClient
 
-class VNExpressSpider(scrapy.Spider):
+class Kenh14Spider(scrapy.Spider):
     name = 'vnexpress-spider'
-    start_urls = ['https://vnexpress.net/']
+    start_urls = ['https://kenh14.vn/']
 
     custom_settings = {
         'DOWNLOAD_DELAY': 1,
@@ -24,9 +24,9 @@ class VNExpressSpider(scrapy.Spider):
         ],
     }
 
-    def __init__(self, mongo_client):
+    def __init__(self):
         super().__init__()
-        self.client = mongo_client
+        self.client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
@@ -35,32 +35,29 @@ class VNExpressSpider(scrapy.Spider):
         self.page_count = 0
 
     def parse(self, response):
-        CATEGORY_SELECTOR = 'nav.main-nav ul.parent li a::attr(href)'
+        CATEGORY_SELECTOR = 'khw-bottom-header ul.kbh-menu-list li a::attr(href)'
         for category_url in response.css(CATEGORY_SELECTOR).extract():
             yield response.follow(category_url, self.parse_category)
 
     def parse_category(self, response):
-        ARTICLE_SELECTOR = 'article .title-news a::attr(href)'
+        TOP_NEWS_SELECTOR = 'div.klw-top-news h3.knswli-title > a::attr(href)'
+        SLIDE_WRAPPER_SELECTOR = 'div.klwfn-slide-wrapper h3.knswli-title > a::attr(href)'
 
-        for article_url in response.css(ARTICLE_SELECTOR).extract():
+        top_news_urls = response.css(TOP_NEWS_SELECTOR).extract()
+        slide_wrapper_urls = response.css(SLIDE_WRAPPER_SELECTOR).extract()
+
+        for article_url in top_news_urls + slide_wrapper_urls:
             yield response.follow(article_url, self.parse_article)
 
-        if self.page_count < 5:
-            NEXT_PAGE_SELECTOR = 'a.next-page::attr(href)'
-            next_page = response.css(NEXT_PAGE_SELECTOR).extract_first()
-            if next_page:
-                self.page_count += 1
-                yield response.follow(next_page, self.parse_category)
-
     def parse_article(self, response):
-        TIME_SELECTOR = 'div.header-content span.date::text'
-        TITLE_SELECTOR = 'h1.title-detail::text'
-        SUMMARY_SELECTOR = 'p.description::text'
-        AUTHOR_SELECTOR = 'p.Normal[style="text-align:right;"] strong::text'
-        DETAIL_SELECTOR = 'article.fck_detail p.Normal::text'
-        CATEGORY_SELECTOR = 'nav.main-nav ul.parent li.active a::text'
-        QUIZ_SELECTOR = 'article.fck_detail div.item_quiz .tittle_quiz::text'
-        
+        TIME_SELECTOR = 'span.kbwcm-time::text'
+        TITLE_SELECTOR = 'h1.kbwc-title::text'
+        SUMMARY_SELECTOR = 'h2.knc-sapo::text'
+        AUTHOR_SELECTOR = 'p[style*="text-align:right"] strong::text'
+        DETAIL_SELECTOR = 'div.knc-content p::text'
+        CATEGORY_SELECTOR = 'div.kbwc-breadcrumb a::text'
+        QUIZ_SELECTOR = 'div.quiz-container'
+
         time_post = response.css(TIME_SELECTOR).extract_first()
         if time_post:
             time_post = self.convert_time_format(time_post)
@@ -84,7 +81,7 @@ class VNExpressSpider(scrapy.Spider):
             content = " ".join(response.css(DETAIL_SELECTOR).extract())
 
             article_data = {
-                'source': 'Báo VnExpress',
+                'source': 'Báo Kenh14',
                 'url': response.url,
                 'title': title,
                 'summary': response.css(SUMMARY_SELECTOR).extract_first(),
@@ -102,8 +99,7 @@ class VNExpressSpider(scrapy.Spider):
 
     def convert_time_format(self, time_str):
         try:
-            time_str = time_str.split(', ', 1)[1].rsplit(' ', 1)[0]
-            dt = datetime.strptime(time_str, '%d/%m/%Y, %H:%M')
+            dt = datetime.strptime(time_str, '%H:%M %d/%m/%Y')
             dt = pytz.timezone('Asia/Ho_Chi_Minh').localize(dt).isoformat()
             return dt
         except ValueError as e:

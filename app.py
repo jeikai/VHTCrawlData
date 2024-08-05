@@ -14,7 +14,7 @@ mongo_client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.
 crawler_process = None
 spider_running = False
 
-@app.route('/start_spider', methods=['POST'])
+@app.route('/crawl_multiple_articles_VNExpress', methods=['POST'])
 def start_spider():
     global spider_running
     if spider_running:
@@ -26,21 +26,6 @@ def start_spider():
     process.start(False) 
     spider_running = True
     return jsonify({"status": "success", "message": "Spider started"}), 200
-
-@app.route('/spider_status', methods=['GET'])
-def spider_status():
-    global spider_running
-    return jsonify({"spider_running": spider_running}), 200
-
-@app.route('/stop_spider', methods=['POST'])
-def stop_spider():
-    global spider_running
-    if not spider_running:
-        return jsonify({"status": "error", "message": "Spider is not running"}), 400
-    
-    reactor.stop()
-    spider_running = False
-    return jsonify({"status": "success", "message": "Spider stopped"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
