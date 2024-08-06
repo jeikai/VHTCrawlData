@@ -1,7 +1,7 @@
 import scrapy
 from datetime import datetime, timedelta
 import pytz
-from pymongo import MongoClient
+from pymongo import MongoClient, errors
 
 class VNExpressSpider(scrapy.Spider):
     name = 'vnexpress-spider'
@@ -24,24 +24,30 @@ class VNExpressSpider(scrapy.Spider):
         ],
     }
 
-    def __init__(self, mongo_client):
-        super().__init__()
+    def __init__(self, mongo_client, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
+        self.client_closed = False
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
         self.page_count = 0
 
     def parse(self, response):
+        if self.client_closed:
+            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
+            return
         CATEGORY_SELECTOR = 'nav.main-nav ul.parent li a::attr(href)'
         for category_url in response.css(CATEGORY_SELECTOR).extract():
             yield response.follow(category_url, self.parse_category)
 
     def parse_category(self, response):
+        if self.client_closed:
+            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
+            return
         ARTICLE_SELECTOR = 'article .title-news a::attr(href)'
-
         for article_url in response.css(ARTICLE_SELECTOR).extract():
             yield response.follow(article_url, self.parse_article)
 
@@ -53,6 +59,9 @@ class VNExpressSpider(scrapy.Spider):
                 yield response.follow(next_page, self.parse_category)
 
     def parse_article(self, response):
+        if self.client_closed:
+            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
+            return
         TIME_SELECTOR = 'div.header-content span.date::text'
         TITLE_SELECTOR = 'h1.title-detail::text'
         SUMMARY_SELECTOR = 'p.description::text'
@@ -77,7 +86,7 @@ class VNExpressSpider(scrapy.Spider):
             return
         
         author = response.css(AUTHOR_SELECTOR).extract_first()
-        tag_list = response.css(CATEGORY_SELECTOR).extract()
+        tag_list = [tag.strip() for tag in response.css(CATEGORY_SELECTOR).extract()]
 
         if author and tag_list:
             title = response.css(TITLE_SELECTOR).extract_first()
@@ -89,7 +98,7 @@ class VNExpressSpider(scrapy.Spider):
                 'title': title,
                 'summary': response.css(SUMMARY_SELECTOR).extract_first(),
                 'author': author,
-                'time': article_date,  # Insert datetime object
+                'time': article_date, 
                 'tagList': tag_list,
                 'content': content
             }
@@ -97,6 +106,11 @@ class VNExpressSpider(scrapy.Spider):
             try:
                 self.collection.insert_one(article_data)
                 self.log(f"Article {title} inserted into MongoDB.")
+            except errors.OperationFailure as e:
+                self.log(f"Failed to insert article {title} into MongoDB: {e}")
+                if "Cannot use MongoClient after close" in str(e):
+                    self.client_closed = True
+                    self.crawler.engine.close_spider(self, "MongoDB client is closed.")
             except Exception as e:
                 self.log(f"Failed to insert article {title} into MongoDB: {e}")
 
@@ -112,3 +126,4 @@ class VNExpressSpider(scrapy.Spider):
 
     def closed(self, reason):
         self.client.close()
+        self.client_closed = True
