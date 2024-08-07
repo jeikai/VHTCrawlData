@@ -1,11 +1,12 @@
 from flask import Flask, jsonify, request
-from scrapy.crawler import CrawlerProcess
+from scrapy.crawler import CrawlerRunner, CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from pymongo import MongoClient
 from scrapy.signalmanager import dispatcher
 from scrapy import signals
 from scraper_VNExpress import VNExpressSpider  # Replace 'scraper_VNExpress' with the name of your VNExpress spider file
 from scraper_Kenh14 import Kenh14Spider  # Replace 'scraper_Kenh14' with the name of your Kenh14 spider file
+from twisted.internet import reactor
 
 app = Flask(__name__)
 
@@ -28,34 +29,6 @@ def spider_closed(spider):
 
 dispatcher.connect(spider_closed, signal=signals.spider_closed)
 
-@app.route('/crawl_VNExpress', methods=['GET'])
-def start_vnexpress_spider():
-    global spider_running, crawler_process
-    if spider_running:
-        return jsonify({"status": "error", "message": "Spider is already running"}), 400
-    
-    settings = get_project_settings()
-    crawler_process = CrawlerProcess(settings)
-    crawler_process.crawl(VNExpressSpider, mongo_client=mongo_client)
-    crawler_process.start(False)
-    spider_running = True
-    spiders_status['VNExpress'] = True
-    return jsonify({"status": "success", "message": "VNExpress spider started"}), 200
-
-@app.route('/crawl_Kenh14', methods=['GET'])
-def start_kenh14_spider():
-    global spider_running, crawler_process
-    if spider_running:
-        return jsonify({"status": "error", "message": "Spider is already running"}), 400
-    
-    settings = get_project_settings()
-    crawler_process = CrawlerProcess(settings)
-    crawler_process.crawl(Kenh14Spider, mongo_client=mongo_client)
-    crawler_process.start(False)
-    spider_running = True
-    spiders_status['Kenh14'] = True
-    return jsonify({"status": "success", "message": "Kenh14 spider started"}), 200
-
 @app.route('/crawl_both', methods=['GET'])  
 def start_both_spiders():
     global spider_running, crawler_process
@@ -63,10 +36,12 @@ def start_both_spiders():
         return jsonify({"status": "error", "message": "Spiders are already running"}), 400
 
     settings = get_project_settings()
-    crawler_process = CrawlerProcess(settings)
-    crawler_process.crawl(VNExpressSpider, mongo_client=mongo_client)
-    crawler_process.crawl(Kenh14Spider, mongo_client=mongo_client)
-    crawler_process.start(False)
+    runner = CrawlerRunner(settings)
+    deferred = runner.crawl(VNExpressSpider, mongo_client=mongo_client)
+    deferred.addCallback(lambda _: runner.crawl(Kenh14Spider, mongo_client=mongo_client))
+    deferred.addCallback(lambda _: reactor.stop())
+    reactor.run(installSignalHandlers=False)  # this will block until all crawlers finish
+
     spider_running = True
     spiders_status['VNExpress'] = True
     spiders_status['Kenh14'] = True
@@ -83,7 +58,7 @@ def stop_crawl():
         return jsonify({"status": "error", "message": "No spiders are running"}), 400
     
     if crawler_process:
-        crawler_process.stop()
+        reactor.stop()
     spider_running = False
     spiders_status['VNExpress'] = False
     spiders_status['Kenh14'] = False
