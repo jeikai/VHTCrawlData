@@ -27,14 +27,13 @@ class Kenh14Spider(scrapy.Spider):
     def __init__(self, mongo_client, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mongo_client = mongo_client
-        self.client = MongoClient(mongo_client.address)  # Create a new MongoClient
+        self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
         self.client_closed = False
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
-        self.page_count = 0
 
     def parse(self, response):
         if self.client_closed:
@@ -124,6 +123,3 @@ class Kenh14Spider(scrapy.Spider):
             self.log(f"Error parsing time: {e}")
             return self.now.isoformat()
 
-    def closed(self, reason):
-        self.client.close()
-        self.client_closed = True

@@ -124,6 +124,3 @@ class VNExpressSpider(scrapy.Spider):
             self.log(f"Error parsing time: {e}")
             return self.now.isoformat()
 
-    def closed(self, reason):
-        self.client.close()
-        self.client_closed = True
