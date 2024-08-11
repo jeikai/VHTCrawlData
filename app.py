@@ -95,7 +95,7 @@ def start_both_spiders():
         
         return jsonify({"status": "success", "message": "Both spiders started"}), 200
     except Exception as e:
-        logger.error(f"Error starting both spiders: {e}")
+        logger.error(f"Error starting both spiders: {e}") 
         spider_running = False
         spiders_status['VNExpress'] = False
         spiders_status['Kenh14'] = False
