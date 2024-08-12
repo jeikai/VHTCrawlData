@@ -1,118 +1,105 @@
-import scrapy
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 from pymongo import MongoClient, errors
+from urllib.parse import urljoin
 
-class VNExpressSpider(scrapy.Spider):
-    name = 'vnexpress-spider'
-    start_urls = ['https://vnexpress.net/']
+class VNExpressCrawler:
+    def __init__(self, mongo_client):
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
 
-    custom_settings = {
-        'DOWNLOAD_DELAY': 1,
-        'RANDOMIZE_DOWNLOAD_DELAY': True,
-        'DOWNLOADER_MIDDLEWARES': {
-            'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
-            'scrapy.downloadermiddlewares.retry.RetryMiddleware': 90,
-            'scrapy_fake_useragent.middleware.RandomUserAgentMiddleware': 400,
-        },
-        'RETRY_TIMES': 10,
-        'RETRY_HTTP_CODES': [429, 500, 502, 503, 504, 522, 524, 408],
-        'FAKEUSERAGENT_PROVIDERS': [
-            'scrapy_fake_useragent.providers.FakeUserAgentProvider',
-            'scrapy_fake_useragent.providers.FakerProvider',
-            'scrapy_fake_useragent.providers.FixedUserAgentProvider',
-        ],
-    }
-
-    def __init__(self, mongo_client, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        # Path to your ChromeDriver
+        self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
+        
         self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
-        self.client_closed = False
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
         self.page_count = 0
 
-    def parse(self, response):
-        if self.client_closed:
-            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
-            return
-        CATEGORY_SELECTOR = 'nav.main-nav ul.parent li a::attr(href)'
-        for category_url in response.css(CATEGORY_SELECTOR).extract():
-            yield response.follow(category_url, self.parse_category)
+    def crawl(self):
+        try:
+            self.driver.get('https://vnexpress.net/')
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-    def parse_category(self, response):
-        if self.client_closed:
-            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
-            return
-        ARTICLE_SELECTOR = 'article .title-news a::attr(href)'
-        for article_url in response.css(ARTICLE_SELECTOR).extract():
-            yield response.follow(article_url, self.parse_article)
+            category_links = soup.select('nav.main-nav ul.parent li a')
+            for category_link in category_links:
+                category_url = urljoin('https://vnexpress.net', category_link['href'])
+                self.crawl_category(category_url)
+        finally:
+            self.driver.quit()
+            self.client.close()
 
-        if self.page_count < 5:
-            NEXT_PAGE_SELECTOR = 'a.next-page::attr(href)'
-            next_page = response.css(NEXT_PAGE_SELECTOR).extract_first()
-            if next_page:
-                self.page_count += 1
-                yield response.follow(next_page, self.parse_category)
-
-    def parse_article(self, response):
-        if self.client_closed:
-            self.crawler.engine.close_spider(self, "MongoDB client is closed.")
+    def crawl_category(self, category_url):
+        if self.page_count >= 5:
             return
-        TIME_SELECTOR = 'div.header-content span.date::text'
-        TITLE_SELECTOR = 'h1.title-detail::text'
-        SUMMARY_SELECTOR = 'p.description::text'
-        AUTHOR_SELECTOR = 'p.Normal[style="text-align:right;"] strong::text'
-        DETAIL_SELECTOR = 'article.fck_detail p.Normal::text'
-        CATEGORY_SELECTOR = 'nav.main-nav ul.parent li.active a::text'
-        QUIZ_SELECTOR = 'article.fck_detail div.item_quiz .tittle_quiz::text'
+
+        self.driver.get(category_url)
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
         
-        time_post = response.css(TIME_SELECTOR).extract_first()
+        article_links = soup.select('article .title-news a')
+        for article_link in article_links:
+            article_url = urljoin('https://vnexpress.net', article_link['href'])
+            self.crawl_article(article_url)
+
+        next_page_link = soup.select_one('a.next-page')
+        if next_page_link:
+            self.page_count += 1
+            next_page_url = urljoin('https://vnexpress.net', next_page_link['href'])
+            self.crawl_category(next_page_url)
+
+    def crawl_article(self, article_url):
+        self.driver.get(article_url)
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+
+        time_post = soup.select_one('div.header-content span.date')
         if time_post:
-            time_post = self.convert_time_format(time_post)
+            time_post = self.convert_time_format(time_post.text)
             article_date = datetime.fromisoformat(time_post)
         else:
             article_date = self.now
-        
+
         if not (self.three_weeks_ago <= article_date <= self.now):
-            self.log(f"Article with URL {response.url} is outside the desired date range.")
+            print(f"Article with URL {article_url} is outside the desired date range.")
             return
-        
-        if len(response.css(QUIZ_SELECTOR).extract()) > 0:
-            self.log(f"Article with URL {response.url} contains a quiz and will not be inserted into MongoDB.")
+
+        if soup.select('article.fck_detail div.item_quiz .tittle_quiz'):
+            print(f"Article with URL {article_url} contains a quiz and will not be inserted into MongoDB.")
             return
-        
-        author = response.css(AUTHOR_SELECTOR).extract_first()
-        tag_list = [tag.strip() for tag in response.css(CATEGORY_SELECTOR).extract()]
+
+        author = soup.select_one('p.Normal[style="text-align:right;"] strong')
+        tag_list = [tag.text.strip() for tag in soup.select('nav.main-nav ul.parent li.active a')]
 
         if author and tag_list:
-            title = response.css(TITLE_SELECTOR).extract_first()
-            content = " ".join(response.css(DETAIL_SELECTOR).extract())
+            title = soup.select_one('h1.title-detail').text if soup.select_one('h1.title-detail') else None
+            summary = soup.select_one('p.description').text if soup.select_one('p.description') else None
+            content = " ".join([p.text for p in soup.select('article.fck_detail p.Normal')])
 
             article_data = {
                 'source': 'Báo VnExpress',
-                'url': response.url,
+                'url': article_url,
                 'title': title,
-                'summary': response.css(SUMMARY_SELECTOR).extract_first(),
-                'author': author,
-                'time': article_date, 
+                'summary': summary,
+                'author': author.text if author else None,
+                'time': article_date,
                 'tagList': tag_list,
                 'content': content
             }
 
             try:
                 self.collection.insert_one(article_data)
-                self.log(f"Article {title} inserted into MongoDB.")
+                print(f"Article {title} inserted into MongoDB.")
             except errors.OperationFailure as e:
-                self.log(f"Failed to insert article {title} into MongoDB: {e}")
-                if "Cannot use MongoClient after close" in str(e):
-                    self.client_closed = True
-                    self.crawler.engine.close_spider(self, "MongoDB client is closed.")
-            except Exception as e:
-                self.log(f"Failed to insert article {title} into MongoDB: {e}")
+                print(f"Failed to insert article {title} into MongoDB: {e}")
 
     def convert_time_format(self, time_str):
         try:
@@ -121,6 +108,10 @@ class VNExpressSpider(scrapy.Spider):
             dt = pytz.timezone('Asia/Ho_Chi_Minh').localize(dt).isoformat()
             return dt
         except ValueError as e:
-            self.log(f"Error parsing time: {e}")
+            print(f"Error parsing time: {e}")
             return self.now.isoformat()
 
+# Usage example:
+mongo_client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
+crawler = VNExpressCrawler(mongo_client)
+crawler.crawl()
