@@ -2,6 +2,9 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
@@ -17,6 +20,7 @@ class Kenh14Crawler:
 
         # Path to your ChromeDriver
         self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
+        self.driver.set_page_load_timeout(600) 
         
         self.client = mongo_client
         self.db = self.client['vht']
@@ -44,7 +48,12 @@ class Kenh14Crawler:
         if self.page_count >= 5:
             return
 
-        self.driver.get(category_url)
+        try:
+            self.driver.get(category_url)
+        except TimeoutException:
+            print(f"Page {category_url} timed out, skipping.")
+            return
+
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
         
         # Selecting top news and slide wrapper URLs
@@ -55,7 +64,12 @@ class Kenh14Crawler:
             self.crawl_article(article_url)
 
     def crawl_article(self, article_url):
-        self.driver.get(article_url)
+        try:
+            self.driver.get(article_url)
+        except TimeoutException:
+            print(f"Article page {article_url} timed out, skipping.")
+            return
+        
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
         time_post = soup.select_one('span.kbwcm-time')

@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 import pytz
 from pymongo import MongoClient, errors
 from urllib.parse import urljoin
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 class VNExpressCrawler:
     def __init__(self, mongo_client):
@@ -17,6 +20,7 @@ class VNExpressCrawler:
 
         # Path to your ChromeDriver
         self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
+        self.driver.set_page_load_timeout(600)  # Set timeout to 10 minutes
         
         self.client = mongo_client
         self.db = self.client['vht']
@@ -29,6 +33,7 @@ class VNExpressCrawler:
     def crawl(self):
         try:
             self.driver.get('https://vnexpress.net/')
+            WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'nav.main-nav ul.parent li a')))
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
             category_links = soup.select('nav.main-nav ul.parent li a')
@@ -42,8 +47,13 @@ class VNExpressCrawler:
     def crawl_category(self, category_url):
         if self.page_count >= 5:
             return
-
-        self.driver.get(category_url)
+        try:
+            self.driver.get(category_url)
+            WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article .title-news a')))
+        except TimeoutException:
+            print(f"Page {category_url} timed out, skipping.")
+            return
+        
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
         
         article_links = soup.select('article .title-news a')
@@ -58,7 +68,13 @@ class VNExpressCrawler:
             self.crawl_category(next_page_url)
 
     def crawl_article(self, article_url):
-        self.driver.get(article_url)
+        try:
+            self.driver.get(article_url)
+            WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div.header-content span.date')))
+        except TimeoutException:
+            print(f"Article page {article_url} timed out, skipping.")
+            return
+        
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
         time_post = soup.select_one('div.header-content span.date')
