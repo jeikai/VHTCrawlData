@@ -11,6 +11,8 @@ import pytz
 from pymongo import MongoClient, errors
 from urllib.parse import urljoin
 
+import threading
+
 class Kenh14Crawler:
     def __init__(self, mongo_client):
         chrome_options = Options()
@@ -18,10 +20,9 @@ class Kenh14Crawler:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
 
-        # Path to your ChromeDriver
         self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
-        self.driver.set_page_load_timeout(600) 
-        
+        self.driver.set_page_load_timeout(600)
+
         self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
@@ -29,8 +30,11 @@ class Kenh14Crawler:
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
         self.page_count = 0
+        self.stop_event = threading.Event()
+        self.status = 'Not Started'
 
     def crawl(self):
+        self.status = 'Running'
         try:
             self.driver.get('https://kenh14.vn/')
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
@@ -38,11 +42,15 @@ class Kenh14Crawler:
             category_links = soup.select('.khw-bottom-header ul.kbh-menu-list li.kmli > a')
             for category_link in category_links:
                 if category_link['href'] != 'javascript:;' and category_link['href'] != 'http://video.kenh14.vn/' and category_link['href'] != "/":
+                    if self.stop_event.is_set():
+                        self.status = 'Stopped'
+                        return
                     category_url = urljoin('https://kenh14.vn', category_link['href'])
                     self.crawl_category(category_url)
         finally:
             self.driver.quit()
             self.client.close()
+            self.status = 'Completed'
 
     def crawl_category(self, category_url):
         if self.page_count >= 5:
@@ -56,14 +64,18 @@ class Kenh14Crawler:
 
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
         
-        # Selecting top news and slide wrapper URLs
         top_news_urls = [urljoin('https://kenh14.vn', a['href']) for a in soup.select('div.klw-top-news ul.ktnc-list li.ktncli > a')]
         slide_wrapper_urls = [urljoin('https://kenh14.vn', a['href']) for a in soup.select('div.klwfn-slide-wrapper ul.knswli-object-list li.klwfnswn > a')]
 
         for article_url in top_news_urls + slide_wrapper_urls:
+            if self.stop_event.is_set():
+                return
             self.crawl_article(article_url)
 
     def crawl_article(self, article_url):
+        if self.stop_event.is_set():
+            return
+
         try:
             self.driver.get(article_url)
         except TimeoutException:
@@ -120,7 +132,8 @@ class Kenh14Crawler:
             print(f"Error parsing time: {e}")
             return self.now.isoformat()
 
-# Usage example:
-mongo_client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
-crawler = Kenh14Crawler(mongo_client)
-crawler.crawl()
+    def stop(self):
+        self.stop_event.set()
+
+    def get_status(self):
+        return self.status

@@ -11,6 +11,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
+import threading
+
 class VNExpressCrawler:
     def __init__(self, mongo_client):
         chrome_options = Options()
@@ -18,10 +20,9 @@ class VNExpressCrawler:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
 
-        # Path to your ChromeDriver
         self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
-        self.driver.set_page_load_timeout(600)  # Set timeout to 10 minutes
-        
+        self.driver.set_page_load_timeout(600)
+
         self.client = mongo_client
         self.db = self.client['vht']
         self.collection = self.db['test_phuc']
@@ -29,8 +30,11 @@ class VNExpressCrawler:
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
         self.page_count = 0
+        self.stop_event = threading.Event()
+        self.status = 'Not Started'
 
     def crawl(self):
+        self.status = 'Running'
         try:
             self.driver.get('https://vnexpress.net/')
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'nav.main-nav ul.parent li a')))
@@ -38,11 +42,15 @@ class VNExpressCrawler:
 
             category_links = soup.select('nav.main-nav ul.parent li a')
             for category_link in category_links:
+                if self.stop_event.is_set():
+                    self.status = 'Stopped'
+                    return
                 category_url = urljoin('https://vnexpress.net', category_link['href'])
                 self.crawl_category(category_url)
         finally:
             self.driver.quit()
             self.client.close()
+            self.status = 'Completed'
 
     def crawl_category(self, category_url):
         if self.page_count >= 5:
@@ -58,6 +66,8 @@ class VNExpressCrawler:
         
         article_links = soup.select('article .title-news a')
         for article_link in article_links:
+            if self.stop_event.is_set():
+                return
             article_url = urljoin('https://vnexpress.net', article_link['href'])
             self.crawl_article(article_url)
 
@@ -68,6 +78,9 @@ class VNExpressCrawler:
             self.crawl_category(next_page_url)
 
     def crawl_article(self, article_url):
+        if self.stop_event.is_set():
+            return
+
         try:
             self.driver.get(article_url)
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div.header-content span.date')))
@@ -127,7 +140,9 @@ class VNExpressCrawler:
             print(f"Error parsing time: {e}")
             return self.now.isoformat()
 
-# Usage example:
-mongo_client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
-crawler = VNExpressCrawler(mongo_client)
-crawler.crawl()
+    def stop(self):
+        self.stop_event.set()
+
+    def get_status(self):
+        return self.status
+
