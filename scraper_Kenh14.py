@@ -25,7 +25,7 @@ class Kenh14Crawler:
 
         self.client = mongo_client
         self.db = self.client['vht']
-        self.collection = self.db['test_phuc']
+        self.collection = self.db['test']
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
