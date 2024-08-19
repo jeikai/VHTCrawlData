@@ -3,6 +3,7 @@ from threading import Thread
 from pymongo import MongoClient
 from scraper_VNExpress import VNExpressCrawler
 from scraper_Kenh14 import Kenh14Crawler
+from text_process import DuplicateRemover
 
 app = Flask(__name__)
 
@@ -42,6 +43,12 @@ def stop_crawl():
     kenh14_crawler.stop()
 
     return jsonify({"message": "Crawlers stopped"}), 200
+
+@app.route('/remove_duplicates', methods=['POST'])
+def remove_duplicates():
+    duplicate_remover = DuplicateRemover(mongo_client, 'vht', 'test_phuc')
+    duplicates_removed = duplicate_remover.remove_duplicates()
+    return jsonify({"message": f"{duplicates_removed} groups of duplicates removed."}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
