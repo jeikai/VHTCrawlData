@@ -5,78 +5,85 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import NoSuchElementException
 import time
+from urllib.parse import urljoin
 
-PATH = 'D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'
+class FacebookScraper:
+    def __init__(self, username, password, driver_path, scrolls=10):
+        self.username = username
+        self.password = password
+        self.driver_path = driver_path
+        self.page_count = 0
+        self.service = Service(driver_path)
+        self.options = webdriver.ChromeOptions()
+        self.driver = webdriver.Chrome(service=self.service, options=self.options)
+        
+    def login(self, target_url):
+        login_url = "https://www.facebook.com/login"
+        self.driver.get(login_url)
 
-USERNAME = '0989194097'
-PASSWORD = 'phucdepzai123'
+        username_field = self.driver.find_element(By.ID, 'email')
+        password_field = self.driver.find_element(By.ID, 'pass')
 
-service = Service(PATH)
-options = webdriver.ChromeOptions()
+        username_field.send_keys(self.username)
+        password_field.send_keys(self.password)
 
-driver = webdriver.Chrome(service=service, options=options)
+        password_field.send_keys(Keys.RETURN)
+        time.sleep(3)
+        
+        self.driver.get(target_url)
 
-login_url = "https://www.facebook.com/login"
-driver.get(login_url)
-
-time.sleep(5)
-
-username_field = driver.find_element(By.ID, 'email')
-password_field = driver.find_element(By.ID, 'pass')
-
-username_field.send_keys(USERNAME)
-password_field.send_keys(PASSWORD)
-
-password_field.send_keys(Keys.RETURN)
-
-time.sleep(5)
-
-target_url = "https://web.facebook.com/langthanghanoiofficial"
-driver.get(target_url)
-
-time.sleep(5)
-
-# Scroll down to load more posts
-scrolls = 10
-for _ in range(scrolls):
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(2)
-
-try:
-    xem_them_buttons = driver.find_elements(By.CSS_SELECTOR, 'div.x1i10hfl.xjbqb8w.x1ejq31n.xd10rxx.x1sy0etr.x17r0tee.x972fbf.xcfux6l.x1qhh985.xm0m39n.x9f619.x1ypdohk.xt0psk2.xe8uvvx.xdj266r.x11i5rnm.xat24cr.x1mh8g0r.xexx8yu.x4uap5.x18d9i69.xkhd6sd.x16tdsg8.x1hl2dhg.xggy1nq.x1a2a7pz.x1sur9pj.xkrqix3.xzsf02u.x1s688f[role="button"]')
-    for button in xem_them_buttons:
         try:
-            button.click()
-            time.sleep(1)  
-        except:
-            continue
-except NoSuchElementException:
-    pass
+            timeline_link = self.driver.find_element(By.XPATH, '//a[contains(text(),"Dòng thời gian")]')
+            timeline_link.click()
+            time.sleep(2) 
+            current_url = self.driver.current_url
+            self.scrape_page(current_url)
+        except NoSuchElementException:
+            print("The 'Dòng thời gian' link was not found.")
+            self.close()
+        
+    def scrape_page(self, url):
+        if self.page_count >= 5:
+            return
 
-resp = driver.page_source
-driver.close()
+        self.driver.get(url)
+        time.sleep(2)
+        resp = self.driver.page_source
+        soup = BeautifulSoup(resp, 'html.parser')
 
-soup = BeautifulSoup(resp, 'html.parser')
+        post_links = soup.select('a:contains("Toàn bộ tin")')
+        
+        for link in post_links:
+            post_url = link['href']
+            post_soup = self.get_soup_from_url(post_url)
+            self.extract_posts(post_soup)
 
-def checkExist(modal, element, classname):
-    try:
-        value = modal.find(element, {'class': classname})
-        return value
-    except NoSuchElementException:
-        return None
+        next_page_link = soup.select_one('a:contains("Xem tin khác")')
+        if next_page_link:
+            self.page_count += 1
+            next_page_url = urljoin('https://mbasic.facebook.com', next_page_link['href'])
+            self.scrape_page(next_page_url)
+        
+    def get_soup_from_url(self, url):
+        full_url = f"https://mbasic.facebook.com{url}"
+        self.driver.get(full_url)
+        time.sleep(2)
+        page_source = self.driver.page_source
+        soup = BeautifulSoup(page_source, 'html.parser')
+        return soup
 
-posts = soup.find_all('div', {'class': 'x1yztbdb x1n2onr6 xh8yej3 x1ja2u2z'})
+    def extract_posts(self, soup):
+        print(soup)
 
-post_details = []
+    def close(self):
+        self.driver.close()
 
-for post in posts:
-    post_info = {}
+# Usage
+if __name__ == "__main__":
+    USERNAME = '0989194097'
+    PASSWORD = 'phucdepzai123'
+    PATH = 'D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'
     
-    content = checkExist(post, 'div', 'xdj266r x11i5rnm xat24cr x1mh8g0r x1vvkbs')
-    if content:
-        post_info['content'] = content.get_text(strip=True)
-
-    post_details.append(post_info)
-
-for detail in post_details:
-    print(detail)
+    scraper = FacebookScraper(USERNAME, PASSWORD, PATH)
+    scraper.login("https://mbasic.facebook.com/VTVcab.Tintuc")
+    scraper.close()
