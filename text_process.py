@@ -2,8 +2,6 @@ from pymongo import MongoClient
 import re
 import logging
 
-logging.basicConfig(filename='preprocessing.log', level=logging.INFO, format='%(asctime)s - %(message)s')
-
 class DataPreprocessor:
     def __init__(self, mongo_client, db_name, collection_name):
         self.client = mongo_client
@@ -25,7 +23,7 @@ class DataPreprocessor:
             cleaned_summary = self.clean_text(original_summary)
             cleaned_content = self.clean_text(original_content)
 
-            unique_key = (cleaned_title, cleaned_summary, record['author'], record['time'])
+            unique_key = (original_title, original_summary)
             
             if unique_key in seen:
                 duplicates.append(record['_id'])
@@ -52,6 +50,8 @@ class DataPreprocessor:
             logging.info(f'Records deleted: {duplicates}')
 
     def clean_text(self, text):
+        if text is None:
+            return ''
         text = re.sub(r'\n', ' ', text)
         text = re.sub(r'[^\w\s]', '', text)
         text = re.sub(r'\s+', ' ', text).strip()

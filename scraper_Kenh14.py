@@ -1,68 +1,56 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 from pymongo import MongoClient, errors
 from urllib.parse import urljoin
-
 import threading
 
 class Kenh14Crawler:
-    def __init__(self, mongo_client):
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-
-        self.driver = webdriver.Chrome(service=Service('D:/Download/chromedriver-win64/chromedriver-win64/chromedriver.exe'), options=chrome_options)
-        self.driver.set_page_load_timeout(600)
-
+    def __init__(self, mongo_client, db, collection):
         self.client = mongo_client
-        self.db = self.client['vht']
-        self.collection = self.db['test']
+        self.db = self.client[db]
+        self.collection = self.db[collection]
         self.now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         self.two_weeks_ago = self.now - timedelta(weeks=2)
         self.three_weeks_ago = self.now - timedelta(weeks=3)
         self.page_count = 0
         self.stop_event = threading.Event()
         self.status = 'Not Started'
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
 
     def crawl(self):
         self.status = 'Running'
         try:
-            self.driver.get('https://kenh14.vn/')
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            response = requests.get('https://kenh14.vn/', headers=self.headers, timeout=30)
+            soup = BeautifulSoup(response.content, 'html.parser')
 
             category_links = soup.select('.khw-bottom-header ul.kbh-menu-list li.kmli > a')
             for category_link in category_links:
-                if category_link['href'] != 'javascript:;' and category_link['href'] != 'http://video.kenh14.vn/' and category_link['href'] != "/":
+                if category_link['href'] not in ['javascript:;', 'http://video.kenh14.vn/', "/"]:
                     if self.stop_event.is_set():
                         self.status = 'Stopped'
                         return
                     category_url = urljoin('https://kenh14.vn', category_link['href'])
                     self.crawl_category(category_url)
         finally:
-            self.driver.quit()
-            self.client.close()
+            # self.client.close()
             self.status = 'Completed'
 
     def crawl_category(self, category_url):
         if self.page_count >= 5:
             return
-
+        
         try:
-            self.driver.get(category_url)
-        except TimeoutException:
-            print(f"Page {category_url} timed out, skipping.")
+            response = requests.get(category_url, headers=self.headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to load page {category_url}: {e}")
             return
 
-        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        soup = BeautifulSoup(response.content, 'html.parser')
         
         top_news_urls = [urljoin('https://kenh14.vn', a['href']) for a in soup.select('div.klw-top-news ul.ktnc-list li.ktncli > a')]
         slide_wrapper_urls = [urljoin('https://kenh14.vn', a['href']) for a in soup.select('div.klwfn-slide-wrapper ul.knswli-object-list li.klwfnswn > a')]
@@ -75,14 +63,15 @@ class Kenh14Crawler:
     def crawl_article(self, article_url):
         if self.stop_event.is_set():
             return
-
+        
         try:
-            self.driver.get(article_url)
-        except TimeoutException:
-            print(f"Article page {article_url} timed out, skipping.")
+            response = requests.get(article_url, headers=self.headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to load article page {article_url}: {e}")
             return
         
-        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        soup = BeautifulSoup(response.content, 'html.parser')
 
         time_post = soup.select_one('span.kbwcm-time')
         if time_post:
@@ -125,12 +114,14 @@ class Kenh14Crawler:
 
     def convert_time_format(self, time_str):
         try:
+            time_str = time_str.strip()
             dt = datetime.strptime(time_str, '%H:%M %d/%m/%Y')
             dt = pytz.timezone('Asia/Ho_Chi_Minh').localize(dt).isoformat()
             return dt
         except ValueError as e:
             print(f"Error parsing time: {e}")
             return self.now.isoformat()
+
 
     def stop(self):
         self.stop_event.set()
