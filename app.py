@@ -8,8 +8,10 @@ from text_process import DataPreprocessor
 app = Flask(__name__)
 
 mongo_client = MongoClient('mongodb+srv://phuongvv:kjnhkjnh@vht.w3g8gh9.mongodb.net/?retryWrites=true&w=majority&appName=VHT')
-vnexpress_crawler = VNExpressCrawler(mongo_client)
-kenh14_crawler = Kenh14Crawler(mongo_client)
+db='vht'
+collection='test'
+vnexpress_crawler = VNExpressCrawler(mongo_client, db, collection)
+kenh14_crawler = Kenh14Crawler(mongo_client, db, collection)
 
 vnexpress_thread = None
 kenh14_thread = None
@@ -20,12 +22,12 @@ def start_crawl():
     global vnexpress_thread, kenh14_thread, vnexpress_crawler, kenh14_crawler
 
     if vnexpress_thread is None or not vnexpress_thread.is_alive():
-        vnexpress_crawler = VNExpressCrawler(mongo_client)  # Reset instance
+        vnexpress_crawler = VNExpressCrawler(mongo_client, db, collection)
         vnexpress_thread = Thread(target=vnexpress_crawler.crawl)
         vnexpress_thread.start()
 
     if kenh14_thread is None or not kenh14_thread.is_alive():
-        kenh14_crawler = Kenh14Crawler(mongo_client)  # Reset instance
+        kenh14_crawler = Kenh14Crawler(mongo_client, db, collection)
         kenh14_thread = Thread(target=kenh14_crawler.crawl)
         kenh14_thread.start()
 
@@ -52,7 +54,7 @@ def stop_crawl():
 def preprocess():
     global preprocess_thread
     if preprocess_thread is None or not preprocess_thread.is_alive():
-        duplicate_remover = DataPreprocessor(mongo_client, 'vht', 'test')
+        duplicate_remover = DataPreprocessor(mongo_client, db, collection)
         preprocess_thread = Thread(target=duplicate_remover.preprocess)
         preprocess_thread.start()
 

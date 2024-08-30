@@ -3,8 +3,6 @@ import re
 import logging
 from collections import deque
 
-logging.basicConfig(filename='preprocessing.log', level=logging.INFO, format='%(asctime)s - %(message)s')
-
 class DataPreprocessor:
     def __init__(self, mongo_client, db_name, collection_name):
         self.client = mongo_client
@@ -30,8 +28,8 @@ class DataPreprocessor:
             cleaned_summary = self.clean_text(original_summary)
             cleaned_content = self.clean_text(original_content)
 
-            unique_key = (cleaned_title, cleaned_summary, record['author'], record['time'])
-
+            unique_key = (original_title, original_summary)
+            
             if unique_key in seen:
                 duplicates.append(record['_id'])
                 logging.info(f'Duplicate record found and marked for deletion: {record["_id"]}')
